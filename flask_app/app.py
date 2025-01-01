@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 from functools import wraps
 from dotenv import load_dotenv
+import logging
+import sys
 
 from tool_use_gemini import get_response
 from gmail_tool import get_creds
@@ -8,6 +10,15 @@ from gmail_tool import get_creds
 load_dotenv()
 
 app = Flask(__name__)
+
+def set_up_logging():
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        stream=sys.stdout
+    )
+
+set_up_logging()
 
 def handle_exceptions(f):
     @wraps(f)

@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 import google.generativeai as genai
 from google.generativeai.protos import Content, Part, FunctionCall, FunctionResponse
+import logging
 
 from prompts import FUNCTION_DECLARATION, SYSTEM_MESSAGE
 from gmail_tool import get_email_messages
@@ -55,17 +56,21 @@ def get_function_call(response):
 
 def get_response(messages: list[dict], token: str) -> str:
     model = initialise_model()
+    logging.info(f'User message: {messages[-1]["content"]}')
     contents = parse_messages(messages)
     while True:
         try:
             resp = model.generate_content(contents)
         except Exception as e:
-            print(f"Error generating content: {e} for {contents}: {messages}")
+            logging.error(f"Error generating content: {e} for {contents}: {messages}")
             raise e
         if function_call := get_function_call(resp):
+            logging.info(f'Function call: name={function_call[0]}, args={function_call[1]}')
             tool_response = get_tool_response(function_call[0], function_call[1], token)
+            logging.info(f'Tool response: {tool_response}')
             contents.append(Content(role='model', parts=[Part(function_call=FunctionCall(name=function_call[0], args=function_call[1]))]))
             contents.append(Content(role='user', parts=[Part(function_response=FunctionResponse(name=function_call[0], response={'result': tool_response}))]))
         else:
+            logging.info(f'Final response: {resp.text}')
             return resp.text
 

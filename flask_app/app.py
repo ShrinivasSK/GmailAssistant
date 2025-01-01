@@ -84,8 +84,8 @@ def chat(token: str):
     data = request.get_json()
     messages = data['messages']
 
-    response = get_response(messages, token)
-    return jsonify({'response': response})
+    messages, emails = get_response(messages, token)
+    return jsonify({'messages': messages, 'emails': emails})
 
 if __name__ == '__main__':
     # only run on local

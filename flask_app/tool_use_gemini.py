@@ -16,7 +16,7 @@ def initialise_model():
     return model
 
 
-def parse_messages(messages: list[dict]) -> list[Content]:
+def parse_messages_to_contents(messages: list[dict]) -> list[Content]:
     contents = []
     for message in messages:
         if message['role'] == 'user':
@@ -30,20 +30,35 @@ def parse_messages(messages: list[dict]) -> list[Content]:
                 contents.append(Content(role='model', parts=[Part(function_call=FunctionCall(name=message['content']['name'], args=message['content']['args']))]))
         elif message['role'] == 'tool_response':
             if contents[-1].role == 'user':
-                contents[-1].parts.append(Part(function_response=FunctionResponse(name=message['content']['name'], result=message['content']['result'])))
+                contents[-1].parts.append(Part(function_response=FunctionResponse(name=message['content']['name'], response={'result': message['content']['result']})))
             else:
-                contents.append(Content(role='user', parts=[Part(function_response=FunctionResponse(name=message['content']['name'], result=message['content']['result']))]))
+                contents.append(Content(role='user', parts=[Part(function_response=FunctionResponse(name=message['content']['name'], response={'result': message['content']['result']}))]))
     return contents
 
+
+def add_function_response(contents: list[Content], messages: list[dict], tool_name: str, result: str):
+    contents.append(Content(role='user', parts=[Part(function_response=FunctionResponse(name=tool_name, response={'result': result}))]))
+    messages.append({'role': 'tool_response', 'content': {'name': tool_name, 'result': result}})
+    return contents, messages
+
+def add_function_call(contents: list[Content], messages: list[dict], tool_name: str, args: dict):
+    contents.append(Content(role='model', parts=[Part(function_call=FunctionCall(name=tool_name, args=args))]))
+    messages.append({'role': 'tool_use', 'content': {'name': tool_name, 'args': args}})
+    return contents, messages
+
+def add_final_response(contents: list[Content], messages: list[dict], response: str):
+    contents.append(Content(role='model', parts=[Part(text=response)]))
+    messages.append({'role': 'model', 'content': response})
+    return contents, messages
 
 def get_tool_response(tool_name: str, args: dict, token: str) -> FunctionResponse:
     if tool_name == "search_emails":
         if 'search_operator' in args:
             return get_email_messages(token, args['search_operator'], max(min(25, args.get('num_search_results', 10)), 3))
         else:
-            return 'Please provide a search operator.'
+            return 'Please provide a search operator.', []
     else:
-        return 'Tool not found.'
+        return 'Tool not found.', []
 
 
 def get_function_call(response):
@@ -57,7 +72,8 @@ def get_function_call(response):
 def get_response(messages: list[dict], token: str) -> str:
     model = initialise_model()
     logging.info(f'User message: {messages[-1]["content"]}')
-    contents = parse_messages(messages)
+    contents = parse_messages_to_contents(messages)
+    relevant_emails = []
     while True:
         try:
             resp = model.generate_content(contents)
@@ -66,11 +82,13 @@ def get_response(messages: list[dict], token: str) -> str:
             raise e
         if function_call := get_function_call(resp):
             logging.info(f'Function call: name={function_call[0]}, args={function_call[1]}')
-            tool_response = get_tool_response(function_call[0], function_call[1], token)
+            tool_response, emails = get_tool_response(function_call[0], function_call[1], token)
             logging.info(f'Tool response: {tool_response}')
-            contents.append(Content(role='model', parts=[Part(function_call=FunctionCall(name=function_call[0], args=function_call[1]))]))
-            contents.append(Content(role='user', parts=[Part(function_response=FunctionResponse(name=function_call[0], response={'result': tool_response}))]))
+            contents, messages = add_function_call(contents, messages, function_call[0], function_call[1])
+            contents, messages = add_function_response(contents, messages, function_call[0], tool_response)
+            relevant_emails.extend(emails)
         else:
             logging.info(f'Final response: {resp.text}')
-            return resp.text
+            contents, messages = add_final_response(contents, messages, resp.text)
+            return messages, relevant_emails
 

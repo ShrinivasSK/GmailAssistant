@@ -27,21 +27,18 @@ def get_creds():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
-            client_secret_base64 = os.getenv("CLIENT_SECRET_BASE64")
-            if client_secret_base64:
-                with open(CLIENT_SECRET_FILE, "wb") as f:
-                    f.write(base64.b64decode(client_secret_base64))
             flow = InstalledAppFlow.from_client_secrets_file(
                 CLIENT_SECRET_FILE, SCOPES
             )
-            creds = flow.run_local_server(port=56521)
+            creds = flow.run_local_server(port=56521, prompt='consent', access_type='offline')
         with open("token.json", "w") as token:
             token.write(creds.to_json())
     return creds
 
 
 @dataclass
-class Message:
+class Email:
+    message_id: str
     from_email: str
     subject: str
     date: str
@@ -51,6 +48,13 @@ class Message:
     def __str__(self):
         return f"<From>{self.from_email}</From>\n<Subject>{self.subject}</Subject>\n<Date>{self.date}</Date>\n<Body>{self.body}</Body>\n{'<Attachments>' + ', '.join(self.attachments) + '</Attachments>' if len(self.attachments) > 0 else ''}"
 
+    def to_dict(self):
+        return {
+            'message_id': self.message_id,
+            'from_email': self.from_email,
+            'subject': self.subject,
+            'date': self.date,
+        }
 
 def extract_text_from_html(html_data):
     if not html_data:
@@ -66,7 +70,7 @@ def clean_message_body(body: str) -> str:
     return "\n".join(cleaned_lines)
 
 
-def get_message_details(message_id: str, token: str, parts: list[str] = ['from', 'subject', 'date', 'body', 'attachments']) -> Message:
+def get_message_details(message_id: str, token: str, parts: list[str] = ['from', 'subject', 'date', 'body', 'attachments']) -> Email:
     try:
         MSG_URL = f'https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}'
         headers = {
@@ -99,15 +103,15 @@ def get_message_details(message_id: str, token: str, parts: list[str] = ['from',
                 text_body = base64.urlsafe_b64decode(message['payload']['body']['data']).decode('utf-8')
         body = text_body if text_body else extract_text_from_html(html_body)
         cleaned_text = clean_message_body(body)
-        return str(Message(from_email=email_from, subject=email_subject, date=email_date, body=cleaned_text.strip(), attachments=attachments))
+        return Email(message_id=message_id, from_email=email_from, subject=email_subject, date=email_date, body=cleaned_text.strip(), attachments=attachments)
     except Exception as e:
         logging.error(f"Error getting message details for {message_id} {e}")
-        return ''
+        return None
 
 
-def get_email_messages(token: str, query: str, num_search_results: int = 10) -> str:
+def get_email_messages(token: str, query: str, num_search_results: int = 10) -> list[Email]:
     try:
-        results = []
+        email_responses = []
         MSG_LIST_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
         headers = {
             'Authorization': f'Bearer {token}',
@@ -118,16 +122,19 @@ def get_email_messages(token: str, query: str, num_search_results: int = 10) -> 
         }
         response = requests.get(MSG_LIST_URL, headers=headers, params=params)
         response.raise_for_status()
-        messages = response.json().get("messages", [])
-        logging.info(f'Received {len(messages)} messages')
-        for message in messages[:num_search_results]:
-            message_details = get_message_details(message["id"], token)
-            logging.debug(f'Message details {message["id"]}: {message_details}')
-            results.append(message_details)
-        response = ('\n'.join(results)).strip()
-        return response if response else 'Some error occurred in fetching emails. Please try again.'
-    except HttpError as error:
-        return f"An error occurred: {error}. If the query is incorrect, try again with by correcting the query."
+        emails = response.json().get("messages", [])
+        logging.info(f'Found {len(emails)} emails')
+        for email in emails[:num_search_results]:
+            email_details = get_message_details(email["id"], token)
+            logging.debug(f'Email details {email["id"]}: {email_details}')
+            if email_details:
+                email_responses.append(email_details)
+        if email_responses:
+            return '\n'.join([str(email) for email in email_responses]), [email.to_dict() for email in email_responses]
+        return 'No emails found.', []
+    except HttpError as e:
+        logging.error(f'Error fetching emails: {e}')
+        return f'Some error occurred in fetching emails: {e}. Please try again.', []
 
 
 if __name__ == "__main__":

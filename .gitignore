@@ -1,0 +1,11 @@
+.vscode/
+.venv*/
+*__pycache__/
+.*/dist/*
+
+notebooks/
+*.env
+.DS_Store
+
+flask_app/token.json
+flask_app/client_secret_local.json

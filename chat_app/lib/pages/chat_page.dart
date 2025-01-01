@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:chat_app/services/auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:chat_app/widgets/chat_message.dart';
+import 'package:chat_app/objects.dart';
+import 'package:chat_app/services/chat_api.dart';
+
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
 
@@ -12,7 +15,49 @@ class ChatPage extends StatefulWidget {
 class _ChatPageState extends State<ChatPage> {
   final TextEditingController _messageController = TextEditingController();
   final ScrollController _scrollController = ScrollController();
-  final List<ChatMessage> _messages = <ChatMessage>[];
+  final List<ChatMessage> _messages = <ChatMessage>[
+    // ChatMessage(
+    //   content: 'Can you summarise my promotional emails?',
+    //   role: ChatRole.user,
+    // ),
+    // ChatMessage(
+    //   content: 'Yes, you received several emails in the last 3 days.  The emails are from various senders including Splitwise, LinkedIn, Github, and others.  The subjects of the emails range from account balances and invitations to software alerts and newsletters.  There is also an email about a mutual fund transaction.\n',
+    //   role: ChatRole.model,
+    //   emails: [
+    //     Email(
+    //       messageId: '123',
+    //       fromEmail: 'test@example.com',
+    //       date: 'Wed, 1 Jan 2025 13:55:56 +0000 (UTC)',
+    //       subject: 'Test email 1',
+    //     ),
+    //     Email(
+    //       messageId: '123',
+    //       fromEmail: 'test@example.com',
+    //       date: 'Wed, 1 Jan 2025 13:55:56 +0000 (UTC)',
+    //       subject: 'Test email 1',
+    //     ),
+    //     Email(
+    //       messageId: '123',
+    //       fromEmail: 'test@example.com',
+    //       date: 'Wed, 1 Jan 2025 13:55:56 +0000 (UTC)',
+    //       subject: 'Test email 1',
+    //     ),
+    //     Email(
+    //       messageId: '123',
+    //       fromEmail: 'test@example.com',
+    //       date: 'Wed, 1 Jan 2025 13:55:56 +0000 (UTC)',
+    //       subject: 'Test email 1',
+    //     ),
+    //     Email(
+    //       messageId: '123',
+    //       fromEmail: 'test@example.com',
+    //       date: 'Wed, 1 Jan 2025 13:55:56 +0000 (UTC)',
+    //       subject: 'Test email 2',
+    //     ),
+    //   ],
+    // ),
+  ];
+  final ChatApi _chatApi = ChatApi();
 
   @override
   void dispose() {
@@ -21,42 +66,54 @@ class _ChatPageState extends State<ChatPage> {
     super.dispose();
   }
 
-  void _sendMessage() {
+  void _sendMessage() async {
     if (_messageController.text.trim().isEmpty) return;
+
+    final userMessage = _messageController.text;
+    _messageController.clear();
 
     setState(() {
       _messages.add(
         ChatMessage(
-          message: _messageController.text,
-          isUser: true,
+          content: userMessage,
+          role: ChatRole.user,
         ),
       );
-      // Add temporary thinking state
       _messages.add(
-        const ChatMessage(
-          message: '',
-          isUser: false,
-          isLoading: true,  // New parameter
+        ChatMessage(
+          content: '',
+          role: ChatRole.model,
+          isLoading: true,
         ),
       );
     });
 
-    _messageController.clear();
     _scrollToBottom();
 
-    // Simulate AI response after delay
-    Future.delayed(const Duration(seconds: 2), () {
+    try {
+      final credentials = await AuthService().getCredentials();
+      final response = await _chatApi.sendMessage(
+        messages: _messages,
+        token: credentials['accessToken'] ?? '',
+      );
+      
       setState(() {
-        _messages.removeLast();  // Remove thinking indicator
+        _messages.removeLast();
+        _messages.addAll(response);
+      });
+    } catch (e) {
+      setState(() {
+        _messages.removeLast();
         _messages.add(
           ChatMessage(
-            message: "The emails are primarily promotional offers and newsletters.\nThere are several promotional emails from companies like Paytm, ICICI Prudential Life Insurance, and Baroda BNP Paribas Mutual Fund.\nThere are also newsletters from Medium containing articles related to AI and technology.\nAdditionally, there are several connection requests from LinkedIn.\n\n**Promotional Emails:**\n\n* **Financial Offers:** These emails include loan offers from Paytm, information on customer experience recognition from ICICI Prudential Life Insurance, and information on mutual fund performance from Baroda BNP Paribas Mutual Fund.\nThere's also an email about accessing insurance policies through Bima Central.\n\n* **Newsletters:** The emails from Medium's Daily Digest are newsletters featuring various articles on AI, data science, and technology.\n\n**LinkedIn Connections:**\n\nSeveral emails are LinkedIn connection requests from different individuals.\nThere is also a notification email indicating increased activity on the user's LinkedIn profile.",
-            isUser: false,
+            content: 'Sorry, an error occurred while processing your request.',
+            role: ChatRole.model,
           ),
         );
       });
-      _scrollToBottom();
-    });
+    }
+    
+    _scrollToBottom();
   }
 
   void _scrollToBottom() {
@@ -82,6 +139,12 @@ class _ChatPageState extends State<ChatPage> {
     }
   }
 
+  void _startNewChat() {
+    setState(() {
+      _messages.clear();
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -105,11 +168,17 @@ class _ChatPageState extends State<ChatPage> {
           ],
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.add),
+            onPressed: _startNewChat,
+            color: Theme.of(context).colorScheme.inversePrimary,
+          ),
+          const SizedBox(width: 4),
           TextButton(
             onPressed: _signOut,
             style: TextButton.styleFrom(
               side: BorderSide(
-                color: Theme.of(context).colorScheme.inversePrimary.withOpacity(0.5),
+                color: Theme.of(context).colorScheme.inversePrimary.withAlpha(128),
                 width: 1,
               ),
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -161,7 +230,10 @@ class _ChatPageState extends State<ChatPage> {
                       padding: const EdgeInsets.all(16),
                       itemCount: _messages.length,
                       itemBuilder: (context, index) {
-                        return _messages[index];
+                        if (!_messages[index].isInternal) {
+                          return ChatMessageWidget(message: _messages[index]);
+                        }
+                        return const SizedBox.shrink();
                       },
                     ),
             ),
@@ -220,3 +292,4 @@ class _ChatPageState extends State<ChatPage> {
     );
   }
 }
+

@@ -68,7 +68,6 @@ def clean_message_body(body: str) -> str:
 
 def get_message_details(message_id: str, token: str, parts: list[str] = ['from', 'subject', 'date', 'body', 'attachments']) -> Message:
     try:
-        logging.debug(f'Getting message details for {message_id}')
         MSG_URL = f'https://gmail.googleapis.com/gmail/v1/users/me/messages/{message_id}'
         headers = {
             'Authorization': f'Bearer {token}',
@@ -77,7 +76,6 @@ def get_message_details(message_id: str, token: str, parts: list[str] = ['from',
         response = requests.get(MSG_URL, headers=headers, params={"format": "full"})
         response.raise_for_status()
         message = response.json()
-        logging.debug(f'Message details: {message}')
         response_headers = message['payload']['headers']
         email_from = next((header['value'] for header in response_headers if header['name'] == 'From'), None)
         email_subject = next((header['value'] for header in response_headers if header['name'] == 'Subject'), None)
@@ -100,9 +98,7 @@ def get_message_details(message_id: str, token: str, parts: list[str] = ['from',
             elif mimeType == 'text/plain':
                 text_body = base64.urlsafe_b64decode(message['payload']['body']['data']).decode('utf-8')
         body = text_body if text_body else extract_text_from_html(html_body)
-        logging.debug(f'Body: {body}')
         cleaned_text = clean_message_body(body)
-        logging.debug(f'Cleaned text: {cleaned_text}')
         return str(Message(from_email=email_from, subject=email_subject, date=email_date, body=cleaned_text.strip(), attachments=attachments))
     except Exception as e:
         logging.error(f"Error getting message details for {message_id} {e}")
@@ -125,7 +121,9 @@ def get_email_messages(token: str, query: str, num_search_results: int = 10) -> 
         messages = response.json().get("messages", [])
         logging.info(f'Received {len(messages)} messages')
         for message in messages[:num_search_results]:
-            results.append(get_message_details(message["id"], token))
+            message_details = get_message_details(message["id"], token)
+            logging.debug(f'Message details {message["id"]}: {message_details}')
+            results.append(message_details)
         response = ('\n'.join(results)).strip()
         return response if response else 'Some error occurred in fetching emails. Please try again.'
     except HttpError as error:
